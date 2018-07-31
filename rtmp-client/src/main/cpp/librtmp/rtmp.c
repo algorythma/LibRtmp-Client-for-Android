@@ -29,8 +29,11 @@
 #include <assert.h>
 #include <time.h>
 
+#include <android/log.h>
+
 #include "rtmp_sys.h"
 #include "log.h"
+#include "../librtmp-jni.h"
 
 #ifdef CRYPTO
 #ifdef USE_POLARSSL
@@ -127,6 +130,7 @@ static int SendBGHasStream(RTMP *r, double dId, AVal *playpath);
 
 static int HandleInvoke(RTMP *r, const char *body, unsigned int nBodySize);
 static int HandleMetadata(RTMP *r, char *body, unsigned int len);
+static int processIfMarker(RTMP *r, char *body, unsigned int len);
 static void HandleChangeChunkSize(RTMP *r, const RTMPPacket *packet);
 static void HandleAudio(RTMP *r, const RTMPPacket *packet);
 static void HandleVideo(RTMP *r, const RTMPPacket *packet);
@@ -1313,8 +1317,13 @@ RTMP_ClientPacket(RTMP *r, RTMPPacket *packet)
       /* metadata (notify) */
       RTMP_Log(RTMP_LOGDEBUG, "%s, received: notify %u bytes", __FUNCTION__,
 	  packet->m_nBodySize);
-      if (HandleMetadata(r, packet->m_body, packet->m_nBodySize))
-	bHasMediaPacket = 1;
+      if (processIfMarker(r, packet->m_body, packet->m_nBodySize)) {
+        __android_log_print (ANDROID_LOG_INFO, "RTMP_CLIENT_ANDROID_LOG",
+                             "%s: Processed Marker with %u bytes", __FUNCTION__,
+                             packet->m_nBodySize);
+      }
+      else if (HandleMetadata(r, packet->m_body, packet->m_nBodySize))
+	      bHasMediaPacket = 1;
       break;
 
     case RTMP_PACKET_TYPE_SHARED_OBJECT:
@@ -1327,9 +1336,8 @@ RTMP_ClientPacket(RTMP *r, RTMPPacket *packet)
       RTMP_Log(RTMP_LOGDEBUG, "%s, received: invoke %u bytes", __FUNCTION__,
 	  packet->m_nBodySize);
       /*RTMP_LogHex(packet.m_body, packet.m_nBodySize); */
-
       if (HandleInvoke(r, packet->m_body, packet->m_nBodySize) == 1)
-	bHasMediaPacket = 2;
+	      bHasMediaPacket = 2;
       break;
 
     case RTMP_PACKET_TYPE_FLASH_VIDEO:
@@ -3300,6 +3308,104 @@ DumpMetaData(AMFObject *obj)
 		    prop->p_name.av_val, str);
 	}
     }
+  return FALSE;
+}
+
+SAVC(marker);
+SAVC(markerAck);
+SAVC(id);
+SAVC(data);
+SAVC(index);
+
+static int
+SendMarkerAck(RTMP *r, double type, double id, double index, AVal *dataAV)
+{
+  RTMPPacket packet;
+  char pbuf[1024], *pend = pbuf + sizeof(pbuf);
+  char *enc;
+
+  __android_log_print (ANDROID_LOG_INFO, "__FUNCTION__",
+                       "Sending markerAck with type: %lf, id: %lf, "
+                               "index: %lf, data: %s[%d]",
+                       type, id, index, dataAV->av_val, dataAV->av_len);
+  packet.m_nChannel = 0x03; /* control channel (invoke) */
+  packet.m_headerType = RTMP_PACKET_SIZE_MEDIUM;
+  packet.m_packetType = RTMP_PACKET_TYPE_INVOKE;
+  packet.m_nTimeStamp = 0;
+  packet.m_nInfoField2 = 0;
+  packet.m_hasAbsTimestamp = 0;
+  packet.m_body = pbuf + RTMP_MAX_HEADER_SIZE;
+
+  enc = packet.m_body;
+  enc = AMF_EncodeString(enc, pend, &av_markerAck);
+
+  *enc++ = AMF_OBJECT;
+  enc = AMF_EncodeNamedNumber(enc, pend, &av_type, type);
+  enc = AMF_EncodeNamedNumber(enc, pend, &av_id, id);
+  enc = AMF_EncodeNamedString(enc, pend, &av_data, dataAV);
+  enc = AMF_EncodeNamedNumber(enc, pend, &av_index, index);
+  *enc++ = 0;
+  *enc++ = 0;
+  *enc++ = AMF_OBJECT_END;
+
+  *enc++ = AMF_NULL;
+
+  packet.m_nBodySize = enc - packet.m_body;
+
+  return RTMP_SendPacket(r, &packet, FALSE);
+}
+
+#if 0
+void dumpData (char *prefix, uint8_t *d, uint len) {
+  int i, j;
+  AVal str;
+  for ( i = 0; (i < len); i+= 16) {
+    __android_log_print (ANDROID_LOG_INFO, __FUNCTION__, "%s: 0x%02x%02x%02x%02x 0x%02x%02x%02x%02x "
+            "0x%02x%02x%02x%02x 0x%02x%02x%02x%02x ", prefix,
+                         d[i + 0], d[i + 1], d[i + 2], d[i + 3], d[i + 4], d[i + 5], d[i + 6], d[i + 7], d[i + 8],
+                         d[i + 9], d[i + 10], d[i + 11], d[i + 12], d[i + 13], d[i + 14], d[i + 15]);
+  }
+  __android_log_print (ANDROID_LOG_INFO, prefix, "str type: %u, len %u, %s; "
+                               "number type: %u, num %u",
+                       d[0], AMF_DecodeInt16(&d[1]), &d[3], d[9], AMF_DecodeNumber(&d[10]));
+  AMF_DecodeString (d + 1, &str);
+  __android_log_print (ANDROID_LOG_INFO, prefix, "decodeString+1: %s, decodeNum+1: %u",
+                       str.av_val, (int)AMF_DecodeNumber (d + 1 + 3 + str.av_len));
+}
+#endif
+
+static int
+processIfMarker(RTMP *r, char *body, unsigned int len) {
+  AVal str, dataAV;
+  int nRes;
+  double type, id, index;
+  AMFObject obj;
+
+  nRes = AMF_Decode (&obj, body, len, FALSE);
+  if (nRes < 0) {
+    __android_log_print (ANDROID_LOG_ERROR, __FUNCTION__,
+                         "failed to decode marker ");
+    return FALSE;
+  }
+  AMF_Dump (&obj);
+
+  AMFProp_GetString (AMF_GetProp (&obj, NULL, 0), &str);
+  if (AVMATCH (&str, &av_marker)) {
+    AMFObject obj2;
+    AMFProp_GetObject (AMF_GetProp (&obj, NULL, 1), &obj2);
+    type = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_type, -1));
+    id = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_id, -1));
+    index = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_index, -1));
+    AMFProp_GetString (AMF_GetProp (&obj2, &av_data, -1), &dataAV);
+    __android_log_print (ANDROID_LOG_INFO, "__FUNCTION__",
+                         "Got marker with type: %lf, id: %lf, "
+                                 "index: %lf, data: %s[%d]",
+                         type, id, index, dataAV.av_val, dataAV.av_len);
+    SendMarkerAck (r, type, id, index, &dataAV);
+    if (index == 1)
+      forwardDataCBToApp (dataAV.av_val, dataAV.av_len);
+    return TRUE;
+  }
   return FALSE;
 }
 

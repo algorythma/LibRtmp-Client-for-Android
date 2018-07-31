@@ -1,16 +1,24 @@
 package net.butterflytv.rtmp_client;
 
+import android.util.Log;
+
 import java.io.IOException;
+import java.util.Arrays;
 
 /**
  * Created by faraklit on 01.01.2016.
  */
 public class RtmpClient {
 
+    public RTMPCallback rtmpCallback;
     static {
         System.loadLibrary("rtmp-jni");
     }
 
+    public RtmpClient () {}
+    public RtmpClient (RTMPCallback rtmpCallback) {
+        this.rtmpCallback = rtmpCallback;
+    }
 
     public final static int OPEN_SUCCESS = 1;
     private long rtmpPointer = 0;
@@ -148,4 +156,11 @@ public class RtmpClient {
 
     private native void nativeClose(long rtmpPointer);
 
+    public void RtmpDataCallback (byte[] data) {
+        rtmpCallback.dataCallback(data);
+    }
+
+    public void RtmpFunctionCallback () {
+        rtmpCallback.functionCallback();
+    }
 }

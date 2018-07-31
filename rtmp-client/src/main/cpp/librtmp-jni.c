@@ -1,7 +1,6 @@
 #include <malloc.h>
 #include "librtmp-jni.h"
 #include "rtmp.h"
-#include <android/log.h>
 //
 // Created by faraklit on 01.01.2016.
 //
@@ -13,6 +12,7 @@
 
 //RTMP *rtmp = NULL;
 
+pthread_key_t current_jni_env;
 
 JNIEXPORT jlong JNICALL
 Java_net_butterflytv_rtmp_1client_RtmpClient_nativeAlloc(JNIEnv *env, jobject instance) {
@@ -20,6 +20,7 @@ Java_net_butterflytv_rtmp_1client_RtmpClient_nativeAlloc(JNIEnv *env, jobject in
     if (rtmp == NULL) {
         return -1;
     }
+    cachedRtmpClientObj = (*env)->NewGlobalRef (env, instance);
     return (long)rtmp;
 }
 
@@ -157,6 +158,7 @@ JNIEXPORT void JNICALL Java_net_butterflytv_rtmp_1client_RtmpClient_nativeClose
         (JNIEnv * env, jobject thiz, jlong rtmpPointer) {
 
     RTMP *rtmp = (RTMP *) rtmpPointer;
+    (*env)->DeleteGlobalRef (env, cachedRtmpClientObj);
     if (rtmp != NULL) {
         RTMP_Close(rtmp);
         RTMP_Free(rtmp);
@@ -184,4 +186,54 @@ jint throwIOException (JNIEnv *env, char *message )
 {
     jclass Exception = (*env)->FindClass(env, "java/io/IOException");
     return (*env)->ThrowNew(env, Exception, message);
+}
+
+jint JNI_OnLoad(JavaVM *vm, void *reserved) {
+    JNIEnv *env = NULL;
+
+    java_vm = vm;
+
+    if ((*vm)->GetEnv(vm, (void**) &env, JNI_VERSION_1_4) != JNI_OK) {
+        __android_log_print (ANDROID_LOG_ERROR, "RTMPCLIENT", "Could not retrieve JNIEnv");
+        return 0;
+    }
+
+    pthread_key_create (&current_jni_env, detach_current_thread);
+
+    return JNI_VERSION_1_4;
+}
+
+void forwardDataCBToApp (char *data, int len) {
+    JNIEnv *env;
+    jclass rtmpClientClass;
+    jmethodID mid;
+
+    env = get_jni_env();
+
+    jbyteArray byteArr = (*env)->NewByteArray(env, len);
+    (*env)->SetByteArrayRegion(env, byteArr, 0, len, data);
+
+    __android_log_print (ANDROID_LOG_INFO, "RTMP_CLIENT_ANDROID_LOG",
+                         "%s: env: %p", __FUNCTION__, *env);
+    rtmpClientClass = (*env)->FindClass (env, "net/butterflytv/rtmp_client/RtmpClient");
+    __android_log_print (ANDROID_LOG_INFO, "RTMP_CLIENT_ANDROID_LOG",
+                         "%s: env: %p, rtmpClientClass: %p, using NON_CACHEDENV",
+                         __FUNCTION__, *env, cachedRtmpClientObj,
+                         (*env)->GetObjectClass (env, cachedRtmpClientObj));
+    mid = (*env)->GetMethodID (env, rtmpClientClass, "RtmpDataCallback", "([B)V");
+    (*env)->CallVoidMethod (env, cachedRtmpClientObj, mid, byteArr);
+}
+
+void forwardFnctCBToApp () {
+    JNIEnv *env;
+    jclass rtmpClientClass;
+    jmethodID mid;
+
+    env = get_jni_env();
+    __android_log_print (ANDROID_LOG_INFO, "RTMP_CLIENT_ANDROID_LOG",
+                         "%s: env: %p", __FUNCTION__, *env);
+
+    rtmpClientClass = (*env)->FindClass (env, "net/butterflytv/rtmp_client/RtmpClient");
+    mid = (*env)->GetMethodID (env, rtmpClientClass, "RtmpFunctionCallback", "()V");
+    (*env)->CallVoidMethod (env, cachedRtmpClientObj, mid);
 }
