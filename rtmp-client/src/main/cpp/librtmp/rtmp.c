@@ -3316,6 +3316,7 @@ SAVC(markerAck);
 SAVC(id);
 SAVC(data);
 SAVC(index);
+SAVC(ack_req);
 
 static int
 SendMarkerAck(RTMP *r, double type, double id, double index, AVal *dataAV)
@@ -3378,7 +3379,7 @@ static int
 processIfMarker(RTMP *r, char *body, unsigned int len) {
   AVal str, dataAV;
   int nRes;
-  double type, id, index;
+  double type, id, index, ackReq;
   AMFObject obj;
 
   nRes = AMF_Decode (&obj, body, len, FALSE);
@@ -3397,11 +3398,13 @@ processIfMarker(RTMP *r, char *body, unsigned int len) {
     id = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_id, -1));
     index = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_index, -1));
     AMFProp_GetString (AMF_GetProp (&obj2, &av_data, -1), &dataAV);
+    ackReq = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_ack_req, -1));
     __android_log_print (ANDROID_LOG_INFO, "__FUNCTION__",
                          "Got marker with type: %lf, id: %lf, "
                                  "index: %lf, data: %s[%d]",
                          type, id, index, dataAV.av_val, dataAV.av_len);
-    SendMarkerAck (r, type, id, index, &dataAV);
+    if (ackReq)
+      SendMarkerAck (r, type, id, index, &dataAV);
     if (index == 1)
       forwardDataCBToApp (dataAV.av_val, dataAV.av_len);
     return TRUE;

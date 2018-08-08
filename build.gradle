@@ -2,8 +2,11 @@
 
 buildscript {
     repositories {
+        maven {
+            url 'https://maven.google.com'
+        }
         jcenter()
-        mavenCentral()
+        maven { url 'https://maven.fabric.io/public' }
         google()
     }
     dependencies {
