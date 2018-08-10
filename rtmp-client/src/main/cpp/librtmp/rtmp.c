@@ -73,6 +73,7 @@ TLS_CTX RTMP_TLS_ctx;
 #define RTMP_LARGE_HEADER_SIZE 12
 
 static const int packetSize[] = { 12, 8, 4, 1 };
+static RTMPMarkerInfo markerInfo;
 
 int RTMP_ctrlC;
 
@@ -130,7 +131,7 @@ static int SendBGHasStream(RTMP *r, double dId, AVal *playpath);
 
 static int HandleInvoke(RTMP *r, const char *body, unsigned int nBodySize);
 static int HandleMetadata(RTMP *r, char *body, unsigned int len);
-static int processIfMarker(RTMP *r, char *body, unsigned int len);
+static int processIfMarker(RTMP *r, char *body, unsigned int len, uint32_t ts);
 static void HandleChangeChunkSize(RTMP *r, const RTMPPacket *packet);
 static void HandleAudio(RTMP *r, const RTMPPacket *packet);
 static void HandleVideo(RTMP *r, const RTMPPacket *packet);
@@ -345,6 +346,7 @@ RTMP_Init(RTMP *r)
   //making timeout value to 10 from 30
   r->Link.timeout = 10;
   r->Link.swfAge = 30;
+  memset (&markerInfo, 0, sizeof (markerInfo));
 }
 
 void
@@ -1226,6 +1228,15 @@ int
 RTMP_ClientPacket(RTMP *r, RTMPPacket *packet)
 {
   int bHasMediaPacket = 0;
+/*
+  if (markerInfo.send && (markerInfo.ts == packet->m_nTimeStamp)) {
+    __android_log_print (ANDROID_LOG_INFO, "RTMP_CLIENT_ANDROID_LOG",
+                         "%s: markerInfo.ts %x : packet ts %x, pkt_type %d", __FUNCTION__,
+                         markerInfo.ts, packet->m_nTimeStamp, packet->m_packetType);
+    forwardDataCBToApp (&markerInfo);
+    markerInfo.send = 0;
+  }
+*/
   switch (packet->m_packetType)
     {
     case RTMP_PACKET_TYPE_CHUNK_SIZE:
@@ -1317,7 +1328,7 @@ RTMP_ClientPacket(RTMP *r, RTMPPacket *packet)
       /* metadata (notify) */
       RTMP_Log(RTMP_LOGDEBUG, "%s, received: notify %u bytes", __FUNCTION__,
 	  packet->m_nBodySize);
-      if (processIfMarker(r, packet->m_body, packet->m_nBodySize)) {
+      if (processIfMarker(r, packet->m_body, packet->m_nBodySize, packet->m_nTimeStamp)) {
         __android_log_print (ANDROID_LOG_INFO, "RTMP_CLIENT_ANDROID_LOG",
                              "%s: Processed Marker with %u bytes", __FUNCTION__,
                              packet->m_nBodySize);
@@ -3319,16 +3330,19 @@ SAVC(index);
 SAVC(ack_req);
 
 static int
-SendMarkerAck(RTMP *r, double type, double id, double index, AVal *dataAV)
+SendMarkerAck(RTMP *r, RTMPMarkerInfo *mInfo)
 {
   RTMPPacket packet;
   char pbuf[1024], *pend = pbuf + sizeof(pbuf);
   char *enc;
 
   __android_log_print (ANDROID_LOG_INFO, "__FUNCTION__",
-                       "Sending markerAck with type: %lf, id: %lf, "
+                       "Sending markerAck with type: %s[%d], id: %lf, "
                                "index: %lf, data: %s[%d]",
-                       type, id, index, dataAV->av_val, dataAV->av_len);
+                       mInfo->typeAV.av_val, mInfo->typeAV.av_len,
+                       mInfo->uid, mInfo->index, mInfo->dataAV.av_val,
+                       mInfo->dataAV.av_len);
+
   packet.m_nChannel = 0x03; /* control channel (invoke) */
   packet.m_headerType = RTMP_PACKET_SIZE_MEDIUM;
   packet.m_packetType = RTMP_PACKET_TYPE_INVOKE;
@@ -3341,10 +3355,10 @@ SendMarkerAck(RTMP *r, double type, double id, double index, AVal *dataAV)
   enc = AMF_EncodeString(enc, pend, &av_markerAck);
 
   *enc++ = AMF_OBJECT;
-  enc = AMF_EncodeNamedNumber(enc, pend, &av_type, type);
-  enc = AMF_EncodeNamedNumber(enc, pend, &av_id, id);
-  enc = AMF_EncodeNamedString(enc, pend, &av_data, dataAV);
-  enc = AMF_EncodeNamedNumber(enc, pend, &av_index, index);
+  enc = AMF_EncodeNamedString(enc, pend, &av_type, &mInfo->typeAV);
+  enc = AMF_EncodeNamedNumber(enc, pend, &av_id, mInfo->uid);
+  enc = AMF_EncodeNamedString(enc, pend, &av_data, &mInfo->dataAV);
+  enc = AMF_EncodeNamedNumber(enc, pend, &av_index, mInfo->index);
   *enc++ = 0;
   *enc++ = 0;
   *enc++ = AMF_OBJECT_END;
@@ -3376,10 +3390,10 @@ void dumpData (char *prefix, uint8_t *d, uint len) {
 #endif
 
 static int
-processIfMarker(RTMP *r, char *body, unsigned int len) {
-  AVal str, dataAV;
+processIfMarker(RTMP *r, char *body, unsigned int len, uint32_t ts) {
+  AVal str; //, dataAV, typeAV;
   int nRes;
-  double type, id, index, ackReq;
+  double /*id, index,*/ ackReq;
   AMFObject obj;
 
   nRes = AMF_Decode (&obj, body, len, FALSE);
@@ -3393,20 +3407,26 @@ processIfMarker(RTMP *r, char *body, unsigned int len) {
   AMFProp_GetString (AMF_GetProp (&obj, NULL, 0), &str);
   if (AVMATCH (&str, &av_marker)) {
     AMFObject obj2;
+
+    markerInfo.ts = ts;
     AMFProp_GetObject (AMF_GetProp (&obj, NULL, 1), &obj2);
-    type = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_type, -1));
-    id = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_id, -1));
-    index = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_index, -1));
-    AMFProp_GetString (AMF_GetProp (&obj2, &av_data, -1), &dataAV);
+    AMFProp_GetString (AMF_GetProp (&obj2, &av_type, -1), &markerInfo.typeAV);
+    markerInfo.uid = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_id, -1));
+    markerInfo.index = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_index, -1));
+    AMFProp_GetString (AMF_GetProp (&obj2, &av_data, -1), &markerInfo.dataAV);
     ackReq = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_ack_req, -1));
     __android_log_print (ANDROID_LOG_INFO, "__FUNCTION__",
-                         "Got marker with type: %lf, id: %lf, "
-                                 "index: %lf, data: %s[%d]",
-                         type, id, index, dataAV.av_val, dataAV.av_len);
+                         "Got marker with type: %s[%d], id: %lf, "
+                                 "index: %lf, data: %s[%d], ts: %x",
+                         markerInfo.typeAV.av_val, markerInfo.typeAV.av_len,
+                         markerInfo.uid, markerInfo.index,
+                         markerInfo.dataAV.av_val, markerInfo.dataAV.av_len, ts);
     if (ackReq)
-      SendMarkerAck (r, type, id, index, &dataAV);
-    if (index == 1)
-      forwardDataCBToApp (dataAV.av_val, dataAV.av_len);
+      SendMarkerAck (r, &markerInfo);
+    if (markerInfo.index == 1) {
+//      markerInfo.send = 1;
+      forwardDataCBToApp(&markerInfo);
+    }
     return TRUE;
   }
   return FALSE;

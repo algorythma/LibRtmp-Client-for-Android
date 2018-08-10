@@ -203,25 +203,32 @@ jint JNI_OnLoad(JavaVM *vm, void *reserved) {
     return JNI_VERSION_1_4;
 }
 
-void forwardDataCBToApp (char *data, int len) {
+void forwardDataCBToApp (RTMPMarkerInfo *mInfo) {
     JNIEnv *env;
     jclass rtmpClientClass;
     jmethodID mid;
 
     env = get_jni_env();
 
-    jbyteArray byteArr = (*env)->NewByteArray(env, len);
-    (*env)->SetByteArrayRegion(env, byteArr, 0, len, data);
+    jbyteArray type = (*env)->NewByteArray (env, (mInfo->typeAV.av_len + 1));
+    (*env)->SetByteArrayRegion(env, type, 0, (mInfo->typeAV.av_len + 1),
+                               mInfo->typeAV.av_val);
 
-    __android_log_print (ANDROID_LOG_INFO, "RTMP_CLIENT_ANDROID_LOG",
-                         "%s: env: %p", __FUNCTION__, *env);
+    jbyteArray byteArr = (*env)->NewByteArray(env, (mInfo->dataAV.av_len + 1));
+    (*env)->SetByteArrayRegion(env, byteArr, 0, (mInfo->dataAV.av_len + 1),
+                               mInfo->dataAV.av_val);
+
     rtmpClientClass = (*env)->FindClass (env, "net/butterflytv/rtmp_client/RtmpClient");
     __android_log_print (ANDROID_LOG_INFO, "RTMP_CLIENT_ANDROID_LOG",
-                         "%s: env: %p, rtmpClientClass: %p, using NON_CACHEDENV",
+                         "%s: env: %p, rtmpClientClass: %p / %p, using NON_CACHEDENV",
                          __FUNCTION__, *env, cachedRtmpClientObj,
                          (*env)->GetObjectClass (env, cachedRtmpClientObj));
-    mid = (*env)->GetMethodID (env, rtmpClientClass, "RtmpDataCallback", "([B)V");
-    (*env)->CallVoidMethod (env, cachedRtmpClientObj, mid, byteArr);
+    mid = (*env)->GetMethodID (env, rtmpClientClass, "RtmpDataCallback", "([BDD[B)V");
+    (*env)->CallVoidMethod (env, cachedRtmpClientObj, mid, type, mInfo->uid, mInfo->index, byteArr);
+
+    (*env)->DeleteLocalRef (env, type);
+    (*env)->DeleteLocalRef (env, byteArr);
+
 }
 
 void forwardFnctCBToApp () {

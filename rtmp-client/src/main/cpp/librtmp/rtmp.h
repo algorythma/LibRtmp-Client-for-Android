@@ -102,6 +102,15 @@ extern "C"
 #define RTMP_PACKET_SIZE_SMALL    2
 #define RTMP_PACKET_SIZE_MINIMUM  3
 
+  typedef struct RTMPMrkrInfo {
+      AVal typeAV;
+      AVal dataAV;
+      double uid;
+      double index;
+      uint8_t send;
+      uint32_t ts;
+  } RTMPMarkerInfo;
+
   typedef struct RTMPChunk
   {
     int c_headerSize;

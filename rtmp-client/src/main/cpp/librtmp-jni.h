@@ -11,6 +11,8 @@
 
 #else
 #include <pthread.h>
+#include <rtmp.h>
+
 #endif
 
 #ifndef _Included_net_butterflytv_rtmp_client_RtmpClient
@@ -101,7 +103,7 @@ Java_net_butterflytv_rtmp_1client_RTMPMuxer_read(JNIEnv *env, jobject instance, 
                                                  jint offset, jint size);
 JNIEXPORT jint JNICALL
 Java_net_butterflytv_rtmp_1client_RTMPMuxer_isConnected(JNIEnv *env, jobject instance);
-void forwardDataCBToApp (char *data, int len);
+void forwardDataCBToApp (RTMPMarkerInfo *mInfo);
 void forwardFunctionCBToApp ();
 
 /* Register this thread with the VM */

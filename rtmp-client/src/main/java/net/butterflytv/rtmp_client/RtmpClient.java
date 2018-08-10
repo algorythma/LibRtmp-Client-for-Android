@@ -156,8 +156,9 @@ public class RtmpClient {
 
     private native void nativeClose(long rtmpPointer);
 
-    public void RtmpDataCallback (byte[] data) {
-        rtmpCallback.dataCallback(data);
+    public void RtmpDataCallback (byte[] type, double uid, double index, byte[] buffer) {
+        RTMPMarker marker = new RTMPMarker (type, uid, index, buffer);
+        rtmpCallback.dataCallback(marker);
     }
 
     public void RtmpFunctionCallback () {
