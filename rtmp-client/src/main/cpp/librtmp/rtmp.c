@@ -3329,12 +3329,16 @@ SAVC(data);
 SAVC(index);
 SAVC(ack_req);
 
+#define RTMP_MARKER_MAXPKTSZ 204800
+
 static int
 SendMarkerAck(RTMP *r, RTMPMarkerInfo *mInfo)
 {
   RTMPPacket packet;
-  char pbuf[1024], *pend = pbuf + sizeof(pbuf);
+//  char pbuf[1024], *pend = pbuf + sizeof(pbuf);
+  char *pbuf, *pend;
   char *enc;
+  int ret = 0;
 
   __android_log_print (ANDROID_LOG_INFO, "__FUNCTION__",
                        "Sending markerAck with type: %s[%d], id: %lf, "
@@ -3342,6 +3346,9 @@ SendMarkerAck(RTMP *r, RTMPMarkerInfo *mInfo)
                        mInfo->typeAV.av_val, mInfo->typeAV.av_len,
                        mInfo->uid, mInfo->index, mInfo->dataAV.av_val,
                        mInfo->dataAV.av_len);
+
+  pbuf = (char *) malloc (RTMP_MARKER_MAXPKTSZ);
+  pend = pbuf + RTMP_MARKER_MAXPKTSZ;
 
   packet.m_nChannel = 0x03; /* control channel (invoke) */
   packet.m_headerType = RTMP_PACKET_SIZE_MEDIUM;
@@ -3367,7 +3374,9 @@ SendMarkerAck(RTMP *r, RTMPMarkerInfo *mInfo)
 
   packet.m_nBodySize = enc - packet.m_body;
 
-  return RTMP_SendPacket(r, &packet, FALSE);
+  ret = RTMP_SendPacket(r, &packet, FALSE);
+  free (pbuf);
+  return ret;
 }
 
 #if 0
