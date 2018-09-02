@@ -72,8 +72,9 @@ TLS_CTX RTMP_TLS_ctx;
 #define RTMP_SIG_SIZE 1536
 #define RTMP_LARGE_HEADER_SIZE 12
 
+RTMPMarkerInfo markerInfo;
+
 static const int packetSize[] = { 12, 8, 4, 1 };
-static RTMPMarkerInfo markerInfo;
 
 int RTMP_ctrlC;
 
@@ -3339,13 +3340,14 @@ SendMarkerAck(RTMP *r, RTMPMarkerInfo *mInfo)
   char *pbuf, *pend;
   char *enc;
   int ret = 0;
+  AVal str;
 
   __android_log_print (ANDROID_LOG_INFO, "__FUNCTION__",
                        "Sending markerAck with type: %s[%d], id: %lf, "
-                               "index: %lf, data: %s[%d]",
-                       mInfo->typeAV.av_val, mInfo->typeAV.av_len,
-                       mInfo->uid, mInfo->index, mInfo->dataAV.av_val,
-                       mInfo->dataAV.av_len);
+                               "index: %lf, data: %.*s[%d]",
+                       mInfo->type, strlen (mInfo->type),
+                       mInfo->uid, mInfo->index, strlen (mInfo->data), mInfo->data,
+                       strlen (mInfo->data));
 
   pbuf = (char *) malloc (RTMP_MARKER_MAXPKTSZ);
   pend = pbuf + RTMP_MARKER_MAXPKTSZ;
@@ -3362,9 +3364,13 @@ SendMarkerAck(RTMP *r, RTMPMarkerInfo *mInfo)
   enc = AMF_EncodeString(enc, pend, &av_markerAck);
 
   *enc++ = AMF_OBJECT;
-  enc = AMF_EncodeNamedString(enc, pend, &av_type, &mInfo->typeAV);
+  str.av_val = mInfo->type;
+  str.av_len = strlen (mInfo->type);
+  enc = AMF_EncodeNamedString(enc, pend, &av_type, &str);
   enc = AMF_EncodeNamedNumber(enc, pend, &av_id, mInfo->uid);
-  enc = AMF_EncodeNamedString(enc, pend, &av_data, &mInfo->dataAV);
+  str.av_val = mInfo->data;
+  str.av_len = strlen (mInfo->data);
+  enc = AMF_EncodeNamedString(enc, pend, &av_data, &str);
   enc = AMF_EncodeNamedNumber(enc, pend, &av_index, mInfo->index);
   *enc++ = 0;
   *enc++ = 0;
@@ -3408,7 +3414,7 @@ processIfMarker(RTMP *r, char *body, unsigned int len, uint32_t ts) {
   nRes = AMF_Decode (&obj, body, len, FALSE);
   if (nRes < 0) {
     __android_log_print (ANDROID_LOG_ERROR, __FUNCTION__,
-                         "failed to decode marker ");
+                         "failed to decode marker");
     return FALSE;
   }
   AMF_Dump (&obj);
@@ -3416,28 +3422,45 @@ processIfMarker(RTMP *r, char *body, unsigned int len, uint32_t ts) {
   AMFProp_GetString (AMF_GetProp (&obj, NULL, 0), &str);
   if (AVMATCH (&str, &av_marker)) {
     AMFObject obj2;
+    AVal str;
 
     markerInfo.ts = ts;
     AMFProp_GetObject (AMF_GetProp (&obj, NULL, 1), &obj2);
-    AMFProp_GetString (AMF_GetProp (&obj2, &av_type, -1), &markerInfo.typeAV);
+
+    AMFProp_GetString (AMF_GetProp (&obj2, &av_type, -1), &str);
+    markerInfo.type = (char *) malloc (str.av_len + 1);
+    memset (markerInfo.type, 0, str.av_len + 1);
+    strncpy (markerInfo.type, str.av_val, str.av_len);
+
     markerInfo.uid = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_id, -1));
     markerInfo.index = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_index, -1));
-    AMFProp_GetString (AMF_GetProp (&obj2, &av_data, -1), &markerInfo.dataAV);
+
+    AMFProp_GetString (AMF_GetProp (&obj2, &av_data, -1), &str);
+    markerInfo.data = (char *) malloc (str.av_len + 1);
+    memset (markerInfo.data, 0, str.av_len + 1);
+    strncpy (markerInfo.data, str.av_val, str.av_len);
+
     ackReq = AMFProp_GetNumber (AMF_GetProp (&obj2, &av_ack_req, -1));
     __android_log_print (ANDROID_LOG_INFO, "__FUNCTION__",
                          "Got marker with type: %s[%d], id: %lf, "
-                                 "index: %lf, data: %s[%d], ts: %x",
-                         markerInfo.typeAV.av_val, markerInfo.typeAV.av_len,
+                                 "index: %lf, data: %.*s[%d], ts: %x",
+                         markerInfo.type, strlen (markerInfo.type),
                          markerInfo.uid, markerInfo.index,
-                         markerInfo.dataAV.av_val, markerInfo.dataAV.av_len, ts);
+                         strlen (markerInfo.data), markerInfo.data, strlen (markerInfo.data), ts);
+    markerInfo.valid = 1;
     if (ackReq)
       SendMarkerAck (r, &markerInfo);
-    if (markerInfo.index == 1) {
+//    if (markerInfo->index == 1) {
 //      markerInfo.send = 1;
-      forwardDataCBToApp(&markerInfo);
-    }
+//      forwardDataCBToApp(&markerInfo);
+//    }
+    /* TODO: Have to free up type/data at proper location */
+//    free (markerInfo.type);
+//    free (markerInfo.data);
+    AMF_Reset (&obj);
     return TRUE;
   }
+  AMF_Reset (&obj);
   return FALSE;
 }
 

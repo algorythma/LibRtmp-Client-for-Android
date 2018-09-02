@@ -3,16 +3,24 @@ package net.butterflytv.rtmp_client;
 import java.util.Arrays;
 
 public class RTMPMarker {
-    private final String type;
-    private final double uid;
-    private final double retryIndex;
-    private final byte[] data;
+    private String type;
+    private double uid;
+    private double retryIndex;
+    private byte[] data;
+    private boolean valid;
 
-    RTMPMarker (byte[] type, double uid, double retryIndex, byte[] data) {
-        this.type = new String (type);
+    RTMPMarker (byte[] type, double uid, double retryIndex, byte[] data, boolean valid) {
+        if (type != null)
+            this.type = new String (type);
+        else
+            this.type = new String ();
         this.uid = uid;
         this.retryIndex = retryIndex;
-        this.data = Arrays.copyOf (data, data.length);
+        if (data != null)
+            this.data = Arrays.copyOf (data, data.length);
+        else
+            this.data = null;
+        this.valid = valid;
     }
 
     public String getType() {
@@ -30,4 +38,8 @@ public class RTMPMarker {
     public byte[] getData () {
         return this.data;
     }
+
+    public boolean isValid () { return this.valid; }
+
+    public void setValid (boolean valid) { this.valid = valid; }
 }

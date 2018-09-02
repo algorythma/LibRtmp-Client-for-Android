@@ -1,4 +1,5 @@
 #include <malloc.h>
+#include <string.h>
 #include "librtmp-jni.h"
 #include "rtmp.h"
 //
@@ -75,6 +76,9 @@ JNIEXPORT jint JNICALL Java_net_butterflytv_rtmp_1client_RtmpClient_nativeRead
         (JNIEnv * env, jobject thiz, jbyteArray data_, jint offset, jint size, jlong rtmpPointer) {
 
     RTMP *rtmp = (RTMP *) rtmpPointer;
+    jclass rtmpClientClass;
+    jfieldID fid;
+
     if (rtmp == NULL) {
         throwIOException(env, "First call open function");
     }
@@ -83,10 +87,54 @@ JNIEXPORT jint JNICALL Java_net_butterflytv_rtmp_1client_RtmpClient_nativeRead
         throwIOException(env, "Connection to server is lost");
     }
 
+    memset (&markerInfo, 0, sizeof (RTMPMarkerInfo));
+
     char* data = malloc(size*sizeof(char));
 
     int readCount = RTMP_Read(rtmp, data, size);
 
+    if (markerInfo.valid) {
+//        jbyteArray type = (*env)->NewByteArray (env, strlen (markerInfo.type) + 1);
+//        (*env)->SetByteArrayRegion(env, type, 0, strlen (markerInfo.type) + 1, (const jbyte *)markerInfo.type);
+
+        jbyteArray type = (*env)->NewByteArray (env, strlen (markerInfo.type) + 1);
+        (*env)->SetByteArrayRegion(env, type, 0, strlen (markerInfo.type) + 1, (const jbyte *)markerInfo.type);
+
+        jbyteArray byteArr = (*env)->NewByteArray(env, strlen (markerInfo.data) + 1);
+        (*env)->SetByteArrayRegion(env, byteArr, 0, strlen (markerInfo.data) + 1, (const jbyte *)markerInfo.data);
+
+
+        jclass markerClass = (*env)->FindClass (env, "net/butterflytv/rtmp_client/RTMPMarker");
+        __android_log_print (ANDROID_LOG_INFO, "RTMP_CLIENT_ANDROID_LOG",
+                             "%s: env: %p, markerClass: %p",
+                             __FUNCTION__, *env, markerClass);
+        jmethodID markerConstructorID = (*env)->GetMethodID (env, markerClass, "<init>", "([BDD[BZ)V");
+        __android_log_print (ANDROID_LOG_INFO, "RTMP_CLIENT_ANDROID_LOG",
+                             "%s: env: %p, markerConstructorID: %p",
+                             __FUNCTION__, *env, markerConstructorID);
+        jobject newMrkrObj = (*env)->NewObject (env, markerClass, markerConstructorID, type,
+                                                markerInfo.uid, markerInfo.index, byteArr, JNI_TRUE);
+        __android_log_print (ANDROID_LOG_INFO, "RTMP_CLIENT_ANDROID_LOG",
+                             "%s: env: %p, newMrkrObj: %p", __FUNCTION__, *env, newMrkrObj);
+
+        rtmpClientClass = (*env)->GetObjectClass (env, thiz);
+        __android_log_print (ANDROID_LOG_INFO, "RTMP_CLIENT_ANDROID_LOG",
+                             "%s: env: %p, rtmpClientClass: %p",
+                             __FUNCTION__, *env,rtmpClientClass);
+        fid = (*env)->GetFieldID (env, rtmpClientClass, "mrkr", "Lnet/butterflytv/rtmp_client/RTMPMarker;");
+        if (fid ==  NULL)
+          __android_log_print (ANDROID_LOG_ERROR, "RTMP_CLIENT_ANDROID_LOG", "%s: "
+                  "RTMPMarker GetFieldID is NULL", __FUNCTION__);
+
+        (*env)->SetObjectField (env, thiz, fid, newMrkrObj);
+
+        (*env)->DeleteLocalRef (env, type);
+        (*env)->DeleteLocalRef (env, byteArr);
+        (*env)->DeleteLocalRef (env, newMrkrObj);
+        markerInfo.valid = 0;
+        free (markerInfo.type);
+        free (markerInfo.data);
+    }
     if (readCount > 0) {
         (*env)->SetByteArrayRegion(env, data_, offset, readCount, data);  // copy
     }
@@ -210,13 +258,11 @@ void forwardDataCBToApp (RTMPMarkerInfo *mInfo) {
 
     env = get_jni_env();
 
-    jbyteArray type = (*env)->NewByteArray (env, (mInfo->typeAV.av_len + 1));
-    (*env)->SetByteArrayRegion(env, type, 0, (mInfo->typeAV.av_len + 1),
-                               mInfo->typeAV.av_val);
+    jbyteArray type = (*env)->NewByteArray (env, strlen (mInfo->type) + 1);
+    (*env)->SetByteArrayRegion(env, type, 0, strlen (mInfo->type) + 1, (const jbyte *)mInfo->type);
 
-    jbyteArray byteArr = (*env)->NewByteArray(env, (mInfo->dataAV.av_len + 1));
-    (*env)->SetByteArrayRegion(env, byteArr, 0, (mInfo->dataAV.av_len + 1),
-                               mInfo->dataAV.av_val);
+    jbyteArray byteArr = (*env)->NewByteArray(env, strlen (mInfo->data) + 1);
+    (*env)->SetByteArrayRegion(env, byteArr, 0, strlen (mInfo->data) + 1, mInfo->data);
 
     rtmpClientClass = (*env)->FindClass (env, "net/butterflytv/rtmp_client/RtmpClient");
     __android_log_print (ANDROID_LOG_INFO, "RTMP_CLIENT_ANDROID_LOG",

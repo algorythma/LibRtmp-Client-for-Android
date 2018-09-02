@@ -11,6 +11,7 @@ import java.util.Arrays;
 public class RtmpClient {
 
     public RTMPCallback rtmpCallback;
+    public RTMPMarker mrkr;
     static {
         System.loadLibrary("rtmp-jni");
     }
@@ -63,6 +64,7 @@ public class RtmpClient {
             rtmpPointer = 0;
             throw new RtmpIOException(result);
         }
+        mrkr = new RTMPMarker (null, -1, -1, null, false);
     }
 
     private native long nativeAlloc();
@@ -102,9 +104,34 @@ public class RtmpClient {
      *
      */
     public int read(byte[] data, int offset, int size) throws IOException {
-        return nativeRead(data, offset, size, rtmpPointer);
+        int ret = 0;
+
+        ret = nativeRead(data, offset, size, rtmpPointer);
+//        if (mrkr.isValid()) {
+//            rtmpCallback.dataCallback(mrkr);
+//            mrkr.setValid (false);
+//        }
+        return ret;
     }
 
+    public void markerToastDisplay () {
+        if (mrkr.isValid()) {
+            rtmpCallback.dataCallback(mrkr);
+            mrkr.setValid(false);
+        }
+    }
+
+    public int read(byte[] data, int offset, int size, boolean [] isMarker) throws IOException {
+        int ret = 0;
+
+        ret = nativeRead(data, offset, size, rtmpPointer);
+        if (mrkr.isValid()) {
+            isMarker[0] = true;
+//            rtmpCallback.dataCallback(mrkr);
+//            mrkr.setValid (false);
+        }
+        return ret;
+    }
     private native int nativeRead(byte[] data, int offset, int size, long rtmpPointer) throws IOException;
 
     /**
@@ -157,7 +184,7 @@ public class RtmpClient {
     private native void nativeClose(long rtmpPointer);
 
     public void RtmpDataCallback (byte[] type, double uid, double index, byte[] buffer) {
-        RTMPMarker marker = new RTMPMarker (type, uid, index, buffer);
+        RTMPMarker marker = new RTMPMarker (type, uid, index, buffer, true);
         rtmpCallback.dataCallback(marker);
     }
 
